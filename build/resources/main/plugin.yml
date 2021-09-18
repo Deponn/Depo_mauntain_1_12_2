@@ -1,0 +1,19 @@
+name: DepMount
+version: '1.0-SNAPSHOT'
+main: deponn.depmount.DepMount
+
+commands: #自作プラグインのコマンドを宣言
+  CreateMountain:
+    description: you can create mountain by using this command. /createmountain X_length Z_length opiton1(false for all or true for only air) opiton2(true for make boundary condition) option3(k of k-nn)
+    usage: please command /CreateMountain x(-150~150) z(-150~150) option1(0 or 1) option2(0 or 1) option3(0 or 1~)
+  UndoMountain:
+    description: you can undo CreateMountain command.
+    usage: only /UndoMountain
+
+permissions:
+  CreateMountain:
+    description: op only
+    default: op
+  UndoMountain:
+    description: op only
+    default: op
