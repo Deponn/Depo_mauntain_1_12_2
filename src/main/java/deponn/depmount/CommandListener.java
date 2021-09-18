@@ -63,7 +63,6 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             }
 
             Location loc = player.getLocation();
-            Block currentBlock;
 
             //コマンド引数を処理
             List<String> argsList = Arrays.asList(args);
@@ -216,11 +215,25 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         }
     }
 
+    /**
+     * 距離の二乗と高さの関係
+     */
+    private static class DistanceHeightData {
+        public final double xzDistance;
+        public final double yHeight;
+
+        public DistanceHeightData(double xzDistance, double yHeight) {
+            this.xzDistance = xzDistance;
+            this.yHeight = yHeight;
+        }
+    }
+
     private interface RegionLoop {
         /**
          * x,z座標ごとにyHeightを変更する
-         * @param xPoint x座標
-         * @param zPoint z座標
+         *
+         * @param xPoint  x座標
+         * @param zPoint  z座標
          * @param yHeight ハイトマップの高さ、未定義は-1
          * @return 更新後のyHeight
          */
@@ -228,9 +241,10 @@ public class CommandListener implements CommandExecutor, TabCompleter {
 
         /**
          * x,z座標ごとにループを行う
-         * @param region 範囲
+         *
+         * @param region         範囲
          * @param heightmapArray ハイトマップデータ
-         * @param func 処理関数
+         * @param func           処理関数
          */
         static void forEach(CuboidRegion region, int[][] heightmapArray, RegionLoop func) {
             int x1 = region.getMinimumPoint().getBlockX();
@@ -301,24 +315,22 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             // ラピスラズリブロックがなかった場合、k近傍法を参考にし、y=sum(yn/((x-xn)^2+(z-zn)^2))/sum(1/((x-xn)^2+(z-zn)^2))で標高計算。あった場合そのy座標が標高
             if (top == -1) {
                 // 距離のリストに変換。
-                ArrayList<ArrayList<Double>> trainingFixedList = new ArrayList<ArrayList<Double>>();
+                ArrayList<DistanceHeightData> trainingFixedList = new ArrayList<DistanceHeightData>();
                 for (ControlPointData line : heightControlPoints) {
-                    ArrayList<Double> oneData = new ArrayList<Double>();
-                    oneData.add(Math.pow(xPoint - line.xPoint, 2) + Math.pow(zPoint - line.zPoint, 2));
-                    oneData.add((double) line.yHeight);
-                    trainingFixedList.add(oneData);
+                    trainingFixedList.add(new DistanceHeightData(
+                            Math.pow(xPoint - line.xPoint, 2) + Math.pow(zPoint - line.zPoint, 2),
+                            line.yHeight
+                    ));
                 }
                 // 距離順にする
                 sort2DListCol(trainingFixedList, heightControlPoints.size());
 
                 // 計算
                 double numerator = 0;
-                for (int i = 0; i < maxi; i++) {
-                    numerator += trainingFixedList.get(i).get(1) / trainingFixedList.get(i).get(0);
-                }
                 double denominator = 0;
                 for (int i = 0; i < maxi; i++) {
-                    denominator += 1 / trainingFixedList.get(i).get(0);
+                    numerator += trainingFixedList.get(i).yHeight / trainingFixedList.get(i).xzDistance;
+                    denominator += 1 / trainingFixedList.get(i).xzDistance;
                 }
                 // ハイトマップを補間
                 top = (int) Math.floor(numerator / denominator);
@@ -349,11 +361,11 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         });
     }
 
-    public static void sort2DListCol(ArrayList<ArrayList<Double>> array, final int columnLength) {
+    public static void sort2DListCol(ArrayList<DistanceHeightData> array, final int columnLength) {
         for (int i = 0; i < columnLength - 1; i++) {
             for (int j = columnLength - 1; j > i; j--) {
-                if (array.get(j - 1).get(0) > array.get(j).get(0)) {
-                    ArrayList<Double> tmp = array.get(j - 1);
+                if (array.get(j - 1).xzDistance > array.get(j).xzDistance) {
+                    DistanceHeightData tmp = array.get(j - 1);
                     array.set(j - 1, array.get(j));
                     array.set(j, tmp);
                 }
