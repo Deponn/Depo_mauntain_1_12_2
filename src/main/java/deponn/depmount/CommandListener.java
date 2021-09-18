@@ -8,10 +8,10 @@ import com.sk89q.worldedit.bukkit.WorldEditPlugin;
 import com.sk89q.worldedit.extension.platform.AbstractPlayerActor;
 import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.regions.Region;
-import com.sk89q.worldedit.world.World;
 import net.md_5.bungee.api.ChatColor;
 import org.bukkit.Location;
 import org.bukkit.Material;
+import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
@@ -40,7 +40,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
 
             WorldEditPlugin worldEdit = JavaPlugin.getPlugin(WorldEditPlugin.class);
             AbstractPlayerActor wPlayer = worldEdit.wrapPlayer(player);
-            World wWorld = wPlayer.getWorld();
+            com.sk89q.worldedit.world.World wWorld = wPlayer.getWorld();
 
             // プレイヤーセッション
             LocalSession session = WorldEdit.getInstance()
@@ -169,135 +169,32 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             }
 
             // ラピスラズリブロックを目印として、範囲中のデータを取得
-            int[][] TrainingArray = new int[bound.getWidth()][bound.getLength()]; //範囲中のラピスラズリブロックの位置を座標指定型で記録
-            ArrayList<ArrayList<Integer>> TrainingList = new ArrayList<ArrayList<Integer>>(); //範囲中のラピスラズリブロックの位置をリストとして記録
-            // x座標方向のループ
-            for (int xPoint = x1; xPoint < x2; xPoint++) {
-                // z座標方向のループ
-                for (int zPoint = z1; zPoint < z2; zPoint++) {
-                    // (x,z)におけるラピスラズリブロックのうち最高を記録。なければ-1を代入
-                    TrainingArray[xPoint - x1][zPoint - z1] = -1;
-                    // y座標方向のループ
-                    for (int yPoint = y1; yPoint < y2; yPoint++) {
-                        // ループで処理する座標のブロックを取得します。
-                        loc.setX(xPoint);
-                        loc.setZ(zPoint);
-                        loc.setY(yPoint);
-                        currentBlock = loc.getBlock();
-                        if (currentBlock.getType() == Material.LAPIS_BLOCK) {
-                            TrainingArray[xPoint - x1][zPoint - z1] = yPoint;
-                        }
-                    }
-                    // ラピスラズリブロックがあった場合にリストに記録
-                    if (TrainingArray[xPoint - x1][zPoint - z1] != -1) {
-                        ArrayList<Integer> OneData = new ArrayList<Integer>();
-                        OneData.add(xPoint);
-                        OneData.add(zPoint);
-                        OneData.add(TrainingArray[xPoint - x1][zPoint - z1]);
-                        TrainingList.add(OneData);
-                    }
+            int[][] heightmapArray = new int[bound.getWidth()][bound.getLength()]; //範囲中のラピスラズリブロックの位置を座標指定型で記録
+            ArrayList<ControlPointData> heightControlPoints = new ArrayList<ControlPointData>(); //範囲中のラピスラズリブロックの位置をリストとして記録
+            collectSurfacePoints(loc.getWorld(), x1, y1, z1, x2, y2, z2, heightmapArray, heightControlPoints);
+
+            // 距離が近い順にk個取り出す。ただし、numInterpolationPoints=0の時は全部
+            int size = heightControlPoints.size();
+            int maxi;
+            if (numInterpolationPoints == 0) {
+                if (size == 0) {
+                    sender.sendMessage("最低一つはラピスラズリブロックをおいてください。");
+                    return true;
                 }
+                maxi = size;
+            } else {
+                if (size < numInterpolationPoints) {
+                    sender.sendMessage("kより多いラピスラズリブロックをおいてください。");
+                    return true;
+                }
+                maxi = numInterpolationPoints;
             }
+
+            // 地形の補間計算
+            interpolateSurface(maxi, x1, z1, x2, z2, heightmapArray, heightControlPoints);
+
             // 範囲中の地形を実際に改変
-            double top;
-            double numerator, denominator;
-            int size;
-            // x座標方向のループ
-            for (int xPoint = x1; xPoint < x2; xPoint++) {
-                // z座標方向のループ
-                for (int zPoint = z1; zPoint < z2; zPoint++) {
-                    // ラピスラズリブロックがなかった場合、k近傍法を参考にし、y=sum(yn/((x-xn)^2+(z-zn)^2))/sum(1/((x-xn)^2+(z-zn)^2))で標高計算。あった場合そのy座標が標高
-                    if (TrainingArray[xPoint - x1][zPoint - z1] == -1) {
-                        try {
-                            size = TrainingList.size();
-                            // 距離のリストに変換。
-                            ArrayList<ArrayList<Double>> TrainingFixedList = new ArrayList<ArrayList<Double>>();
-                            for (int i = 0; i < size; i++) {
-                                ArrayList<Double> OneData = new ArrayList<Double>();
-                                OneData.add(Math.pow(xPoint - TrainingList.get(i).get(0), 2) + Math.pow(zPoint - TrainingList.get(i).get(1), 2));
-                                OneData.add(TrainingList.get(i).get(2).doubleValue());
-                                TrainingFixedList.add(OneData);
-                            }
-                            // 距離順にする
-                            sort2DListCol(TrainingFixedList, size);
-                            // 距離が近い順にk個取り出す。ただし、numInterpolationPoints=0の時は全部
-                            int maxi;
-                            if (numInterpolationPoints == 0) {
-                                if (size == 0) {
-                                    sender.sendMessage("最低一つはラピスラズリブロックをおいてください。");
-                                    return false;
-                                }
-                                maxi = size;
-                            } else {
-                                if (size < numInterpolationPoints) {
-                                    sender.sendMessage("kより多いラピスラズリブロックをおいてください。");
-                                    return false;
-                                }
-                                maxi = numInterpolationPoints;
-                            }
-                            // 計算
-                            numerator = 0;
-                            for (int i = 0; i < maxi; i++) {
-                                numerator += TrainingFixedList.get(i).get(1) / TrainingFixedList.get(i).get(0);
-                            }
-                            denominator = 0;
-                            for (int i = 0; i < maxi; i++) {
-                                denominator += 1 / TrainingFixedList.get(i).get(0);
-                            }
-                            top = numerator / denominator;
-                        } catch (Exception e) {
-                            sender.sendMessage(e.getMessage());
-                            return false;
-                        }
-
-                    } else {
-                        top = TrainingArray[xPoint - x1][zPoint - z1];
-                    }
-
-                    // y座標方向のループ
-                    for (int yPoint = y1; yPoint < y2; yPoint++) {
-                        // ループで処理する座標のブロックを取得します。
-                        loc.setX(xPoint);
-                        loc.setZ(zPoint);
-                        loc.setY(yPoint);
-                        currentBlock = loc.getBlock();
-                        // ラピスラズリブロックを消去したうえで、標高の地点まで土を盛っていく
-                        if (currentBlock.getType() == Material.LAPIS_BLOCK) {
-                            currentBlock.setType(Material.AIR);
-                        }
-                        // bReplaceAllがtrueのとき全て書き換え、falseのとき空気のみ書き換える。
-                        if (bReplaceAll) {
-                            if (top - yPoint < 0) {
-                                currentBlock.setType(Material.AIR);
-                            } else if (top - yPoint < 1) {
-                                currentBlock.setType(Material.GRASS);
-                            } else if (top - yPoint < 5) {
-                                currentBlock.setType(Material.DIRT);
-                            } else {
-                                currentBlock.setType(Material.STONE);
-                            }
-                        } else {
-                            if (top - yPoint < 0) {
-                                if (currentBlock.getType() == Material.AIR) {
-                                    currentBlock.setType(Material.AIR);
-                                }
-                            } else if (top - yPoint < 1) {
-                                if (currentBlock.getType() == Material.AIR) {
-                                    currentBlock.setType(Material.GRASS);
-                                }
-                            } else if (top - yPoint < 5) {
-                                if (currentBlock.getType() == Material.AIR) {
-                                    currentBlock.setType(Material.DIRT);
-                                }
-                            } else {
-                                if (currentBlock.getType() == Material.AIR) {
-                                    currentBlock.setType(Material.STONE);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            applySurface(loc.getWorld(), bReplaceAll, x1, y1, z1, x2, y2, z2, heightmapArray);
 
             return true;
         }
@@ -308,9 +205,134 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         // done undo がシングルのみ対応、done あと、向きが分かりにくい.done k実装、done 空気のみに作用させるか done ラピスラズリブロックなかったとき done境界条件
     }
 
-    public static void sort2DListCol(ArrayList<ArrayList<Double>> array, final int columnlength) {
-        for (int i = 0; i < columnlength - 1; i++) {
-            for (int j = columnlength - 1; j > i; j--) {
+    /**
+     * ハイトマップx,z地点における高さyのデータ
+     */
+    private static class ControlPointData {
+        public final int xPoint, zPoint;
+        public final int yHeight;
+
+        public ControlPointData(int xPoint, int zPoint, int yHeight) {
+            this.xPoint = xPoint;
+            this.zPoint = zPoint;
+            this.yHeight = yHeight;
+        }
+    }
+
+    private void applySurface(World world, boolean bReplaceAll, int x1, int y1, int z1, int x2, int y2, int z2, int[][] heightmapArray) {
+        // x座標方向のループ
+        for (int xPoint = x1; xPoint < x2; xPoint++) {
+            // z座標方向のループ
+            for (int zPoint = z1; zPoint < z2; zPoint++) {
+                // y座標方向のループ
+                for (int yPoint = y1; yPoint < y2; yPoint++) {
+                    // ハイトマップから高さを取得
+                    int top = heightmapArray[xPoint - x1][zPoint - z1];
+                    // ループで処理する座標のブロックを取得します。
+                    Block currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
+                    // ラピスラズリブロックを消去したうえで、標高の地点まで土を盛っていく
+                    if (currentBlock.getType() == Material.LAPIS_BLOCK) {
+                        currentBlock.setType(Material.AIR);
+                    }
+                    // bReplaceAllがtrueのとき全て書き換え、falseのとき空気のみ書き換える。
+                    if (bReplaceAll) {
+                        if (top - yPoint < 0) {
+                            currentBlock.setType(Material.AIR);
+                        } else if (top - yPoint < 1) {
+                            currentBlock.setType(Material.GRASS);
+                        } else if (top - yPoint < 5) {
+                            currentBlock.setType(Material.DIRT);
+                        } else {
+                            currentBlock.setType(Material.STONE);
+                        }
+                    } else {
+                        if (top - yPoint < 0) {
+                            if (currentBlock.getType() == Material.AIR) {
+                                currentBlock.setType(Material.AIR);
+                            }
+                        } else if (top - yPoint < 1) {
+                            if (currentBlock.getType() == Material.AIR) {
+                                currentBlock.setType(Material.GRASS);
+                            }
+                        } else if (top - yPoint < 5) {
+                            if (currentBlock.getType() == Material.AIR) {
+                                currentBlock.setType(Material.DIRT);
+                            }
+                        } else {
+                            if (currentBlock.getType() == Material.AIR) {
+                                currentBlock.setType(Material.STONE);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private void interpolateSurface(int maxi, int x1, int z1, int x2, int z2, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
+        // x座標方向のループ
+        for (int xPoint = x1; xPoint < x2; xPoint++) {
+            // z座標方向のループ
+            for (int zPoint = z1; zPoint < z2; zPoint++) {
+                double top;
+                // ラピスラズリブロックがなかった場合、k近傍法を参考にし、y=sum(yn/((x-xn)^2+(z-zn)^2))/sum(1/((x-xn)^2+(z-zn)^2))で標高計算。あった場合そのy座標が標高
+                if (heightmapArray[xPoint - x1][zPoint - z1] == -1) {
+                    // 距離のリストに変換。
+                    ArrayList<ArrayList<Double>> trainingFixedList = new ArrayList<ArrayList<Double>>();
+                    for (ControlPointData line : heightControlPoints) {
+                        ArrayList<Double> oneData = new ArrayList<Double>();
+                        oneData.add(Math.pow(xPoint - line.xPoint, 2) + Math.pow(zPoint - line.zPoint, 2));
+                        oneData.add((double) line.yHeight);
+                        trainingFixedList.add(oneData);
+                    }
+                    // 距離順にする
+                    sort2DListCol(trainingFixedList, heightControlPoints.size());
+
+                    // 計算
+                    double numerator = 0;
+                    for (int i = 0; i < maxi; i++) {
+                        numerator += trainingFixedList.get(i).get(1) / trainingFixedList.get(i).get(0);
+                    }
+                    double denominator = 0;
+                    for (int i = 0; i < maxi; i++) {
+                        denominator += 1 / trainingFixedList.get(i).get(0);
+                    }
+                    top = numerator / denominator;
+
+                    // ハイトマップを補間
+                    heightmapArray[xPoint - x1][zPoint - z1] = (int) Math.floor(top);
+                }
+            }
+        }
+    }
+
+    private static void collectSurfacePoints(World world, int x1, int y1, int z1, int x2, int y2, int z2, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
+        Block currentBlock;
+        // x座標方向のループ
+        for (int xPoint = x1; xPoint < x2; xPoint++) {
+            // z座標方向のループ
+            for (int zPoint = z1; zPoint < z2; zPoint++) {
+                // (x,z)におけるラピスラズリブロックのうち最高を記録。なければ-1を代入
+                heightmapArray[xPoint - x1][zPoint - z1] = -1;
+                // y座標方向のループ
+                for (int yPoint = y1; yPoint < y2; yPoint++) {
+                    // ループで処理する座標のブロックを取得します。
+                    currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
+                    if (currentBlock.getType() == Material.LAPIS_BLOCK) {
+                        heightmapArray[xPoint - x1][zPoint - z1] = yPoint;
+                    }
+                }
+                // ラピスラズリブロックがあった場合にリストに記録
+                if (heightmapArray[xPoint - x1][zPoint - z1] != -1) {
+                    heightControlPoints.add(new ControlPointData(xPoint, zPoint, heightmapArray[xPoint - x1][zPoint - z1]));
+                }
+            }
+        }
+    }
+
+    public static void sort2DListCol(ArrayList<ArrayList<Double>> array, final int columnLength) {
+        for (int i = 0; i < columnLength - 1; i++) {
+            for (int j = columnLength - 1; j > i; j--) {
                 if (array.get(j - 1).get(0) > array.get(j).get(0)) {
                     ArrayList<Double> tmp = array.get(j - 1);
                     array.set(j - 1, array.get(j));
