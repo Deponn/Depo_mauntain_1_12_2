@@ -5,14 +5,20 @@ import com.sk89q.worldedit.EditSession;
 import com.sk89q.worldedit.Vector;
 import com.sk89q.worldedit.blocks.BaseBlock;
 import com.sk89q.worldedit.blocks.BlockID;
+import com.sk89q.worldedit.function.mask.AbstractExtentMask;
 import com.sk89q.worldedit.function.mask.FuzzyBlockMask;
+import com.sk89q.worldedit.function.mask.Mask2D;
 import com.sk89q.worldedit.function.mask.Masks;
 import com.sk89q.worldedit.function.operation.Operation;
 import com.sk89q.worldedit.patterns.Pattern;
 import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.world.World;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Collections;
+import java.util.Comparator;
 
 public class MountOperation {
     public static Operation collectSurfacePoints(World wWorld, CuboidRegion region, boolean bCollectBorder, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
@@ -62,7 +68,7 @@ public class MountOperation {
                     ));
                 }
                 // 距離順にする
-                sort2DListCol(trainingFixedList, heightControlPoints.size());
+                trainingFixedList.sort(Comparator.comparingDouble(a -> a.xzDistance));
 
                 // 計算
                 double numerator = 0;
@@ -87,6 +93,26 @@ public class MountOperation {
         int y1 = region.getMinimumPoint().getBlockY();
         int y2 = region.getMaximumPoint().getBlockY();
         return new RegionOperation(region, heightmapArray, (xPoint, zPoint, top, context) -> {
+            Pattern pattern = new Pattern() {
+                @Override
+                public BaseBlock next(Vector position) {
+                    int yPoint = position.getBlockY();
+                    if (top - yPoint < 0) {
+                        return air;
+                    } else if (top - yPoint < 1) {
+                        return grass;
+                    } else if (top - yPoint < 5) {
+                        return dirt;
+                    } else {
+                        return stone;
+                    }
+                }
+
+                @Override
+                public BaseBlock next(int x, int y, int z) {
+                    return next(new Vector(x, y, z));
+                }
+            };
             // 縦長の範囲を置き換えする
             // ラピスラズリブロックを消去したうえで、標高の地点まで土を盛っていく
             editSession.replaceBlocks(
@@ -96,40 +122,33 @@ public class MountOperation {
                             new BlockVector(xPoint, bReplaceAll ? y2 : top, zPoint)
                     ),
                     // bReplaceAllがtrueのとき全て書き換え、falseのとき空気のみ書き換える。
-                    bReplaceAll ? Masks.alwaysTrue() : new FuzzyBlockMask(editSession, air, lapis),
-                    new Pattern() {
+                    new AbstractExtentMask(editSession) {
                         @Override
-                        public BaseBlock next(Vector position) {
-                            int yPoint = position.getBlockY();
-                            if (top - yPoint < 0) {
-                                return air;
-                            } else if (top - yPoint < 1) {
-                                return grass;
-                            } else if (top - yPoint < 5) {
-                                return dirt;
-                            } else {
-                                return stone;
+                        public boolean test(Vector vector) {
+                            BaseBlock lazyBlock = getExtent().getLazyBlock(vector);
+                            BaseBlock compare = new BaseBlock(lazyBlock.getType(), lazyBlock.getData());
+                            // 変更がなければ更新しない (差分が増えることでメモリを圧迫するため)
+                            if (compare.equalsFuzzy(pattern.next(vector))) {
+                                return false;
                             }
+                            // ラピスラズリブロックは置き換え
+                            if (compare.equalsFuzzy(lapis)) {
+                                return true;
+                            }
+                            // bReplaceAllがfalseの場合は空気しか置き換えない
+                            if (!bReplaceAll && !compare.equalsFuzzy(air)) {
+                                return false;
+                            }
+                            return true;
                         }
 
+                        @Nullable
                         @Override
-                        public BaseBlock next(int x, int y, int z) {
-                            return next(new Vector(x, y, z));
+                        public Mask2D toMask2D() {
+                            return null;
                         }
-                    });
+                    }, pattern);
             return top;
         });
-    }
-
-    public static void sort2DListCol(ArrayList<DistanceHeightData> array, final int columnLength) {
-        for (int i = 0; i < columnLength - 1; i++) {
-            for (int j = columnLength - 1; j > i; j--) {
-                if (array.get(j - 1).xzDistance > array.get(j).xzDistance) {
-                    DistanceHeightData tmp = array.get(j - 1);
-                    array.set(j - 1, array.get(j));
-                    array.set(j, tmp);
-                }
-            }
-        }
     }
 }
