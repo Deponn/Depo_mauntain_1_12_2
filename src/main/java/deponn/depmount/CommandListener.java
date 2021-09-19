@@ -1,10 +1,13 @@
 package deponn.depmount;
 
-import com.sk89q.worldedit.LocalSession;
-import com.sk89q.worldedit.WorldEdit;
-import com.sk89q.worldedit.WorldEditException;
+import com.sk89q.worldedit.*;
+import com.sk89q.worldedit.blocks.BaseBlock;
+import com.sk89q.worldedit.blocks.BlockID;
 import com.sk89q.worldedit.bukkit.WorldEditPlugin;
 import com.sk89q.worldedit.extension.platform.AbstractPlayerActor;
+import com.sk89q.worldedit.function.mask.BlockMask;
+import com.sk89q.worldedit.function.mask.Masks;
+import com.sk89q.worldedit.patterns.Pattern;
 import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.regions.Region;
 import net.md_5.bungee.api.ChatColor;
@@ -37,6 +40,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             }
             Player player = (Player) sender;
 
+            // WorldEditを取得
             WorldEditPlugin worldEdit = JavaPlugin.getPlugin(WorldEditPlugin.class);
             AbstractPlayerActor wPlayer = worldEdit.wrapPlayer(player);
             com.sk89q.worldedit.world.World wWorld = wPlayer.getWorld();
@@ -130,8 +134,19 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             // 地形の補間計算
             interpolateSurface(maxi, bound, heightmapArray, heightControlPoints);
 
-            // 範囲中の地形を実際に改変
-            applySurface(loc.getWorld(), bReplaceAll, bound, heightmapArray);
+            // ブロック変更開始 (WorldEditのUndoに登録される)
+            EditSession editSession = worldEdit.createEditSession(player);
+            try {
+                // 範囲中の地形を実際に改変
+                applySurface(editSession, wWorld, bReplaceAll, bound, heightmapArray);
+            } catch (RuntimeException e) {
+                // 最大設置数制限超過
+                sender.sendMessage(e.getMessage());
+                return true;
+            } finally {
+                editSession.flushQueue();
+                session.remember(editSession);
+            }
 
             return true;
         }
@@ -204,48 +219,44 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         }
     }
 
-    private void applySurface(World world, boolean bReplaceAll, CuboidRegion region, int[][] heightmapArray) {
+    private void applySurface(EditSession editSession, com.sk89q.worldedit.world.World wWorld, boolean bReplaceAll, CuboidRegion region, int[][] heightmapArray) {
+        BaseBlock lapis = new BaseBlock(BlockID.LAPIS_LAZULI_BLOCK);
+        BaseBlock air = new BaseBlock(BlockID.AIR);
+        BaseBlock grass = new BaseBlock(BlockID.GRASS);
+        BaseBlock dirt = new BaseBlock(BlockID.DIRT);
+        BaseBlock stone = new BaseBlock(BlockID.STONE);
         int y1 = region.getMinimumPoint().getBlockY();
         int y2 = region.getMaximumPoint().getBlockY();
         RegionLoop.forEach(region, heightmapArray, (xPoint, zPoint, top) -> {
-            // y座標方向のループ
-            for (int yPoint = y1; yPoint <= y2; yPoint++) {
-                // ループで処理する座標のブロックを取得します。
-                Block currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
+            try {
+                // 縦長の範囲を置き換えする
                 // ラピスラズリブロックを消去したうえで、標高の地点まで土を盛っていく
-                if (currentBlock.getType() == Material.LAPIS_BLOCK) {
-                    currentBlock.setType(Material.AIR);
-                }
-                // bReplaceAllがtrueのとき全て書き換え、falseのとき空気のみ書き換える。
-                if (bReplaceAll) {
-                    if (top - yPoint < 0) {
-                        currentBlock.setType(Material.AIR);
-                    } else if (top - yPoint < 1) {
-                        currentBlock.setType(Material.GRASS);
-                    } else if (top - yPoint < 5) {
-                        currentBlock.setType(Material.DIRT);
-                    } else {
-                        currentBlock.setType(Material.STONE);
-                    }
-                } else {
-                    if (top - yPoint < 0) {
-                        if (currentBlock.getType() == Material.AIR) {
-                            currentBlock.setType(Material.AIR);
-                        }
-                    } else if (top - yPoint < 1) {
-                        if (currentBlock.getType() == Material.AIR) {
-                            currentBlock.setType(Material.GRASS);
-                        }
-                    } else if (top - yPoint < 5) {
-                        if (currentBlock.getType() == Material.AIR) {
-                            currentBlock.setType(Material.DIRT);
-                        }
-                    } else {
-                        if (currentBlock.getType() == Material.AIR) {
-                            currentBlock.setType(Material.STONE);
-                        }
-                    }
-                }
+                editSession.replaceBlocks(
+                        new CuboidRegion(wWorld, new BlockVector(xPoint, y1, zPoint), new BlockVector(xPoint, y2, zPoint)),
+                        // bReplaceAllがtrueのとき全て書き換え、falseのとき空気のみ書き換える。
+                        bReplaceAll ? Masks.alwaysTrue() : new BlockMask(editSession, air, lapis),
+                        new Pattern() {
+                            @Override
+                            public BaseBlock next(Vector position) {
+                                int yPoint = position.getBlockY();
+                                if (top - yPoint < 0) {
+                                    return air;
+                                } else if (top - yPoint < 1) {
+                                    return grass;
+                                } else if (top - yPoint < 5) {
+                                    return dirt;
+                                } else {
+                                    return stone;
+                                }
+                            }
+
+                            @Override
+                            public BaseBlock next(int x, int y, int z) {
+                                return next(new Vector(x, y, z));
+                            }
+                        });
+            } catch (MaxChangedBlocksException e) {
+                throw new RuntimeException("最大ブロック数制限を超えました", e);
             }
             return top;
         });
