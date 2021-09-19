@@ -7,11 +7,20 @@ import com.sk89q.worldedit.regions.CuboidRegion;
 
 import java.util.List;
 
+/**
+ * x,z座標でループを行うクラス
+ * ティック分散に必要な、作業を中断、及び途中からの作業の再開をサポートする
+ */
 public class RegionOperation implements Operation {
+    // 範囲
     private final CuboidRegion region;
+    // ハイトマップ
     private final int[][] heightmapArray;
+    // 処理関数
     private final RegionLoop func;
+    // キャンセルフラグ
     private boolean canceled;
+    // 現在の進捗状況
     private int current;
 
     /**
@@ -27,12 +36,21 @@ public class RegionOperation implements Operation {
         this.func = func;
     }
 
+    /**
+     * RunContextのshouldContinueがtrueになるまで処理を行う。
+     *
+     * @param run コンテキスト、shouldContinue用
+     * @return 操作オブジェクト
+     * @throws WorldEditException エラー
+     */
     @Override
     public Operation resume(RunContext run) throws WorldEditException {
+        // 範囲
         int x1 = region.getMinimumPoint().getBlockX();
         int z1 = region.getMinimumPoint().getBlockZ();
         int xw = region.getWidth();
         int zw = region.getLength();
+        // 進捗状況を保存しやすくするため、二重ループではなく単一ループにしている
         for (int i = current; i < xw * zw; i++) {
             // x座標方向の相対座標
             int x = i % xw;
@@ -66,11 +84,13 @@ public class RegionOperation implements Operation {
 
     @Override
     public void cancel() {
+        // キャンセルフラグをON
         canceled = true;
     }
 
     @Override
     public void addStatusMessages(List<String> messages) {
+        // 進捗メッセージを出力
         int xw = region.getWidth();
         int zw = region.getLength();
         messages.add(String.format("(%d/%d)", current, xw * zw));

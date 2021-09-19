@@ -1,6 +1,9 @@
 package deponn.depmount;
 
-import com.sk89q.worldedit.*;
+import com.sk89q.worldedit.EditSession;
+import com.sk89q.worldedit.LocalSession;
+import com.sk89q.worldedit.WorldEdit;
+import com.sk89q.worldedit.WorldEditException;
 import com.sk89q.worldedit.bukkit.WorldEditPlugin;
 import com.sk89q.worldedit.extension.platform.AbstractPlayerActor;
 import com.sk89q.worldedit.regions.CuboidRegion;
@@ -18,8 +21,13 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 
-// @note WorldEditがない環境でWorldEditのクラスを読み込まないよう、別クラスに移動
+/**
+ * コマンド処理クラス
+ *
+ * @note WorldEditがない環境でWorldEditのクラスを読み込まないよう、別クラスに移動
+ */
 public class CommandListener implements CommandExecutor, TabCompleter {
+    // コマンドを実際に処理
     @Override
     public boolean onCommand(CommandSender sender, Command cmd, String commandLabel, String[] args) {
         // プレイヤーがコマンドを投入した際の処理...
@@ -146,6 +154,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
                                             s -> s.forEach(str -> sender.sendMessage(ChatColor.GREEN + "ブロックを設置中... " + str)),
                                             e -> sender.sendMessage(ChatColor.RED + e.getMessage()),
                                             () -> {
+                                                sender.sendMessage(ChatColor.GREEN + "ブロックを反映中...");
                                                 editSession.flushQueue();
                                                 session.remember(editSession);
                                                 sender.sendMessage(ChatColor.GREEN + "設置完了");
@@ -170,6 +179,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         // done undo がシングルのみ対応、done あと、向きが分かりにくい.done k実装、done 空気のみに作用させるか done ラピスラズリブロックなかったとき done境界条件
     }
 
+    // コマンドのTAB補完の実装
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
         return null;

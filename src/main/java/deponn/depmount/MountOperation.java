@@ -6,9 +6,7 @@ import com.sk89q.worldedit.Vector;
 import com.sk89q.worldedit.blocks.BaseBlock;
 import com.sk89q.worldedit.blocks.BlockID;
 import com.sk89q.worldedit.function.mask.AbstractExtentMask;
-import com.sk89q.worldedit.function.mask.FuzzyBlockMask;
 import com.sk89q.worldedit.function.mask.Mask2D;
-import com.sk89q.worldedit.function.mask.Masks;
 import com.sk89q.worldedit.function.operation.Operation;
 import com.sk89q.worldedit.patterns.Pattern;
 import com.sk89q.worldedit.regions.CuboidRegion;
@@ -16,18 +14,33 @@ import com.sk89q.worldedit.world.World;
 
 import javax.annotation.Nullable;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
 import java.util.Comparator;
 
+/**
+ * 山を作る際の実際の処理
+ * Operationを返す様になっているのは、ティック分散処理ができるようにするため
+ * 関数から処理が返った段階ではまだ処理は終わっていないため、Operationの完了を待つ必要がある
+ */
 public class MountOperation {
+    /**
+     * ラピスラズリの位置を集める
+     *
+     * @param wWorld              WorldEdit版ワールド
+     * @param region              範囲
+     * @param bCollectBorder      縁をなめらかにつなぐかどうか
+     * @param heightmapArray      ハイトマップ、高さを保持する
+     * @param heightControlPoints ラピスラズリの位置 (出力)
+     * @return 操作オブジェクト
+     */
     public static Operation collectSurfacePoints(World wWorld, CuboidRegion region, boolean bCollectBorder, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
+        // 座標
         int x1 = region.getMinimumPoint().getBlockX();
         int y1 = region.getMinimumPoint().getBlockY();
         int z1 = region.getMinimumPoint().getBlockZ();
         int x2 = region.getMaximumPoint().getBlockX();
         int y2 = region.getMaximumPoint().getBlockY();
         int z2 = region.getMaximumPoint().getBlockZ();
+        // 操作
         return new RegionOperation(region, heightmapArray, (xPoint, zPoint, top, context) -> {
             // (x,z)におけるラピスラズリブロックのうち最高を記録。なければ-1を代入
             top = -1;
@@ -55,7 +68,17 @@ public class MountOperation {
         });
     }
 
+    /**
+     * ラピスラズリの位置から面を補間する計算をする
+     *
+     * @param maxi                最大何個のラピスラズリを加味するか
+     * @param region              範囲
+     * @param heightmapArray      ハイトマップ、高さを保持する
+     * @param heightControlPoints ラピスラズリの位置 (出力)
+     * @return 操作オブジェクト
+     */
     public static Operation interpolateSurface(int maxi, CuboidRegion region, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
+        // 操作
         return new RegionOperation(region, heightmapArray, (xPoint, zPoint, top, context) -> {
             // ラピスラズリブロックがなかった場合、k近傍法を参考にし、y=sum(yn/((x-xn)^2+(z-zn)^2))/sum(1/((x-xn)^2+(z-zn)^2))で標高計算。あった場合そのy座標が標高
             if (top == -1) {
@@ -84,18 +107,33 @@ public class MountOperation {
         });
     }
 
+    /**
+     * 面を実際に地形に反映する
+     *
+     * @param editSession    セッション情報、これを通してワールドを改変することで「//undo」ができるようになる(+軽い)
+     * @param wWorld         WorldEdit版ワールド
+     * @param bReplaceAll    空気ブロック以外も書き換えるかどうか
+     * @param region         範囲
+     * @param heightmapArray ハイトマップ、高さを保持する
+     * @return 操作オブジェクト
+     */
     public static Operation applySurface(EditSession editSession, World wWorld, boolean bReplaceAll, CuboidRegion region, int[][] heightmapArray) {
+        // ブロックを予め定義
         BaseBlock lapis = new BaseBlock(BlockID.LAPIS_LAZULI_BLOCK);
         BaseBlock air = new BaseBlock(BlockID.AIR);
         BaseBlock grass = new BaseBlock(BlockID.GRASS);
         BaseBlock dirt = new BaseBlock(BlockID.DIRT);
         BaseBlock stone = new BaseBlock(BlockID.STONE);
+        // 座標
         int y1 = region.getMinimumPoint().getBlockY();
         int y2 = region.getMaximumPoint().getBlockY();
+        // 操作
         return new RegionOperation(region, heightmapArray, (xPoint, zPoint, top, context) -> {
+            // 改変後の地形のパターン
             Pattern pattern = new Pattern() {
                 @Override
                 public BaseBlock next(Vector position) {
+                    // 表面からの距離に応じて違うブロックにする
                     int yPoint = position.getBlockY();
                     if (top - yPoint < 0) {
                         return air;
@@ -110,12 +148,14 @@ public class MountOperation {
 
                 @Override
                 public BaseBlock next(int x, int y, int z) {
+                    // WorldEditの後方互換性のため
                     return next(new Vector(x, y, z));
                 }
             };
             // 縦長の範囲を置き換えする
             // ラピスラズリブロックを消去したうえで、標高の地点まで土を盛っていく
             editSession.replaceBlocks(
+                    // 範囲、幅と奥行が1マスの縦長の範囲
                     new CuboidRegion(
                             wWorld,
                             new BlockVector(xPoint, y1, zPoint),
@@ -125,6 +165,7 @@ public class MountOperation {
                     new AbstractExtentMask(editSession) {
                         @Override
                         public boolean test(Vector vector) {
+                            // ブロックを取得、getBlockと比べ、getLazyBlockはブロックの種類だけを取得できるため軽い
                             BaseBlock lazyBlock = getExtent().getLazyBlock(vector);
                             BaseBlock compare = new BaseBlock(lazyBlock.getType(), lazyBlock.getData());
                             // 変更がなければ更新しない (差分が増えることでメモリを圧迫するため)
