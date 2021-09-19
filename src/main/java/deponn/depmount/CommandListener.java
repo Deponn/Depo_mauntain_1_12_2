@@ -1,7 +1,6 @@
 package deponn.depmount;
 
 import com.sk89q.worldedit.LocalSession;
-import com.sk89q.worldedit.Vector;
 import com.sk89q.worldedit.WorldEdit;
 import com.sk89q.worldedit.WorldEditException;
 import com.sk89q.worldedit.bukkit.WorldEditPlugin;
@@ -67,7 +66,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             //コマンド引数を処理
             List<String> argsList = Arrays.asList(args);
             boolean bReplaceAll = false;
-            boolean bPlaceBorder = false;
+            boolean bCollectBorder = false;
             int numInterpolationPoints = 0;
             if (argsList.contains("-a") || argsList.contains("--all")) {
                 // 全置き換えモード、trueの場合空気ブロック以外も置き換える
@@ -75,7 +74,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             }
             if (argsList.contains("-b") || argsList.contains("--border")) {
                 // 境界にラピスラズリブロック配置モード、trueの場合境界にラピスラズリブロックをおく
-                bPlaceBorder = true;
+                bCollectBorder = true;
             }
             if (argsList.contains("-n") || argsList.contains("--num")) {
                 // 引数が何番目か取得し、若い番号を採用する
@@ -99,14 +98,9 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             }
             // 範囲を設定
             CuboidRegion bound = new CuboidRegion(region.getWorld(), region.getMinimumPoint(), region.getMaximumPoint());
-            bound.expand(
-                    new Vector(0, (bound.getWorld().getMaxY() + 1), 0),
-                    new Vector(0, -(bound.getWorld().getMaxY() + 1), 0));
-
-            // bPlaceBorderがtureのとき、境界にラピスラズリブロックをおく。境界条件。
-            if (bPlaceBorder) {
-                generateBorder(loc.getWorld(), bound);
-            }
+            //bound.expand(
+            //        new Vector(0, (bound.getWorld().getMaxY() + 1), 0),
+            //        new Vector(0, -(bound.getWorld().getMaxY() + 1), 0));
 
             // 範囲中のラピスラズリブロックの位置を座標指定型で記録
             int[][] heightmapArray = new int[bound.getWidth()][bound.getLength()];
@@ -114,7 +108,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             ArrayList<ControlPointData> heightControlPoints = new ArrayList<ControlPointData>();
 
             // ラピスラズリブロックを目印として、範囲中のデータを取得
-            collectSurfacePoints(loc.getWorld(), bound, heightmapArray, heightControlPoints);
+            collectSurfacePoints(loc.getWorld(), bound, bCollectBorder, heightmapArray, heightControlPoints);
 
             // 距離が近い順にk個取り出す。ただし、numInterpolationPoints=0の時は全部
             int size = heightControlPoints.size();
@@ -146,59 +140,6 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         return false;
 
         // done undo がシングルのみ対応、done あと、向きが分かりにくい.done k実装、done 空気のみに作用させるか done ラピスラズリブロックなかったとき done境界条件
-    }
-
-    private void generateBorder(World world, CuboidRegion region) {
-        int x1 = region.getMinimumPoint().getBlockX();
-        int y1 = region.getMinimumPoint().getBlockY();
-        int z1 = region.getMinimumPoint().getBlockZ();
-        int x2 = region.getMaximumPoint().getBlockX();
-        int y2 = region.getMaximumPoint().getBlockY();
-        int z2 = region.getMaximumPoint().getBlockZ();
-
-        Block currentBlock;
-        // x座標方向のループ
-        for (int xPoint = x1; xPoint < x2; xPoint++) {
-            int zPoint;
-            zPoint = z1;
-            // y座標方向の逆向きループ
-            for (int yPoint = y2; yPoint > y1; yPoint--) {
-                currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
-                if (currentBlock.getType() != Material.AIR) {
-                    currentBlock.setType(Material.LAPIS_BLOCK);
-                    break;
-                }
-            }
-            zPoint = z2 - 1;
-            for (int yPoint = y2; yPoint > y1; yPoint--) {
-                currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
-                if (currentBlock.getType() != Material.AIR) {
-                    currentBlock.setType(Material.LAPIS_BLOCK);
-                    break;
-                }
-            }
-        }
-        // z座標方向のループ
-        for (int zPoint = z1; zPoint < z2; zPoint++) {
-            int xPoint;
-            xPoint = x1;
-            // y座標方向の逆向きループ
-            for (int yPoint = y2; yPoint > y1; yPoint--) {
-                currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
-                if (currentBlock.getType() != Material.AIR) {
-                    currentBlock.setType(Material.LAPIS_BLOCK);
-                    break;
-                }
-            }
-            xPoint = x2 - 1;
-            for (int yPoint = y2; yPoint > y1; yPoint--) {
-                currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
-                if (currentBlock.getType() != Material.AIR) {
-                    currentBlock.setType(Material.LAPIS_BLOCK);
-                    break;
-                }
-            }
-        }
     }
 
     /**
@@ -252,9 +193,9 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             int x2 = region.getMaximumPoint().getBlockX();
             int z2 = region.getMaximumPoint().getBlockZ();
             // x座標方向のループ
-            for (int xPoint = x1; xPoint < x2; xPoint++) {
+            for (int xPoint = x1; xPoint <= x2; xPoint++) {
                 // z座標方向のループ
-                for (int zPoint = z1; zPoint < z2; zPoint++) {
+                for (int zPoint = z1; zPoint <= z2; zPoint++) {
                     int top = heightmapArray[xPoint - x1][zPoint - z1];
                     top = func.loop(xPoint, zPoint, top);
                     heightmapArray[xPoint - x1][zPoint - z1] = top;
@@ -268,7 +209,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         int y2 = region.getMaximumPoint().getBlockY();
         RegionLoop.forEach(region, heightmapArray, (xPoint, zPoint, top) -> {
             // y座標方向のループ
-            for (int yPoint = y1; yPoint < y2; yPoint++) {
+            for (int yPoint = y1; yPoint <= y2; yPoint++) {
                 // ループで処理する座標のブロックを取得します。
                 Block currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
                 // ラピスラズリブロックを消去したうえで、標高の地点まで土を盛っていく
@@ -339,18 +280,30 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         });
     }
 
-    private static void collectSurfacePoints(World world, CuboidRegion region, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
+    private static void collectSurfacePoints(World world, CuboidRegion region, boolean bCollectBorder, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
+        int x1 = region.getMinimumPoint().getBlockX();
         int y1 = region.getMinimumPoint().getBlockY();
+        int z1 = region.getMinimumPoint().getBlockZ();
+        int x2 = region.getMaximumPoint().getBlockX();
         int y2 = region.getMaximumPoint().getBlockY();
+        int z2 = region.getMaximumPoint().getBlockZ();
         RegionLoop.forEach(region, heightmapArray, (xPoint, zPoint, top) -> {
             // (x,z)におけるラピスラズリブロックのうち最高を記録。なければ-1を代入
             top = -1;
             // y座標方向のループ
-            for (int yPoint = y1; yPoint < y2; yPoint++) {
+            for (int yPoint = y2; yPoint >= y1; yPoint--) {
                 // ループで処理する座標のブロックを取得します。
                 Block currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
                 if (currentBlock.getType() == Material.LAPIS_BLOCK) {
                     top = yPoint;
+                    break;
+                }
+                // ボーダーモードがONかつ、座標が縁で空気以外のブロックがあれば、それをラピスブロックとして扱う
+                else if (bCollectBorder
+                        && (xPoint == x1 || xPoint == x2 || zPoint == z1 || zPoint == z2)
+                        && (currentBlock.getType() != Material.AIR)) {
+                    top = yPoint;
+                    break;
                 }
             }
             // ラピスラズリブロックがあった場合にリストに記録
