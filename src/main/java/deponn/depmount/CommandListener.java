@@ -6,15 +6,14 @@ import com.sk89q.worldedit.blocks.BlockID;
 import com.sk89q.worldedit.bukkit.WorldEditPlugin;
 import com.sk89q.worldedit.extension.platform.AbstractPlayerActor;
 import com.sk89q.worldedit.function.mask.BlockMask;
+import com.sk89q.worldedit.function.mask.FuzzyBlockMask;
 import com.sk89q.worldedit.function.mask.Masks;
+import com.sk89q.worldedit.function.operation.Operation;
 import com.sk89q.worldedit.patterns.Pattern;
 import com.sk89q.worldedit.regions.CuboidRegion;
 import com.sk89q.worldedit.regions.Region;
+import com.sk89q.worldedit.world.World;
 import net.md_5.bungee.api.ChatColor;
-import org.bukkit.Location;
-import org.bukkit.Material;
-import org.bukkit.World;
-import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
@@ -43,7 +42,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             // WorldEditを取得
             WorldEditPlugin worldEdit = JavaPlugin.getPlugin(WorldEditPlugin.class);
             AbstractPlayerActor wPlayer = worldEdit.wrapPlayer(player);
-            com.sk89q.worldedit.world.World wWorld = wPlayer.getWorld();
+            World wWorld = wPlayer.getWorld();
 
             // プレイヤーセッション
             LocalSession session = WorldEdit.getInstance()
@@ -65,20 +64,18 @@ public class CommandListener implements CommandExecutor, TabCompleter {
                 return true;
             }
 
-            Location loc = player.getLocation();
-
             //コマンド引数を処理
             List<String> argsList = Arrays.asList(args);
-            boolean bReplaceAll = false;
-            boolean bCollectBorder = false;
-            int numInterpolationPoints = 0;
+            boolean bReplaceAllArg = false;
+            boolean bCollectBorderArg = false;
+            int numInterpolationPointsArg = 0;
             if (argsList.contains("-a") || argsList.contains("--all")) {
                 // 全置き換えモード、trueの場合空気ブロック以外も置き換える
-                bReplaceAll = true;
+                bReplaceAllArg = true;
             }
             if (argsList.contains("-b") || argsList.contains("--border")) {
                 // 境界にラピスラズリブロック配置モード、trueの場合境界にラピスラズリブロックをおく
-                bCollectBorder = true;
+                bCollectBorderArg = true;
             }
             if (argsList.contains("-n") || argsList.contains("--num")) {
                 // 引数が何番目か取得し、若い番号を採用する
@@ -90,8 +87,8 @@ public class CommandListener implements CommandExecutor, TabCompleter {
                 }
                 try {
                     // 補間する頂点(ラピスラズリブロック)の数
-                    numInterpolationPoints = Integer.parseInt(argsList.get(index + 1));
-                    if (numInterpolationPoints < 0) {
+                    numInterpolationPointsArg = Integer.parseInt(argsList.get(index + 1));
+                    if (numInterpolationPointsArg < 0) {
                         sender.sendMessage(ChatColor.RED + "数値は正の数である必要があります。 -n <数字>");
                         return false;
                     }
@@ -100,6 +97,10 @@ public class CommandListener implements CommandExecutor, TabCompleter {
                     return false;
                 }
             }
+            boolean bReplaceAll = bReplaceAllArg;
+            boolean bCollectBorder = bCollectBorderArg;
+            int numInterpolationPoints = numInterpolationPointsArg;
+
             // 範囲を設定
             CuboidRegion bound = new CuboidRegion(region.getWorld(), region.getMinimumPoint(), region.getMaximumPoint());
             //bound.expand(
@@ -111,42 +112,61 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             // 範囲中のラピスラズリブロックの位置をリストとして記録
             ArrayList<ControlPointData> heightControlPoints = new ArrayList<ControlPointData>();
 
+            // 複数ティックに分けて操作をするための準備
+            OperationExecutor executor = new OperationExecutor();
+            executor.start();
+
             // ラピスラズリブロックを目印として、範囲中のデータを取得
-            collectSurfacePoints(loc.getWorld(), bound, bCollectBorder, heightmapArray, heightControlPoints);
+            executor.run(
+                    collectSurfacePoints(wWorld, bound, bCollectBorder, heightmapArray, heightControlPoints),
+                    s -> s.forEach(str -> sender.sendMessage(ChatColor.GREEN + "ラピスラズリの位置を取得中... " + str)),
+                    e -> sender.sendMessage(ChatColor.RED + "ラピスブロック位置の取得中にエラーが発生しました。"),
+                    () -> {
+                        // 距離が近い順にk個取り出す。ただし、numInterpolationPointsArg=0の時は全部
+                        int size = heightControlPoints.size();
+                        int maxi;
+                        if (numInterpolationPoints == 0) {
+                            if (size == 0) {
+                                sender.sendMessage(ChatColor.RED + "最低一つはラピスラズリブロックをおいてください。");
+                                return false;
+                            }
+                            maxi = size;
+                        } else {
+                            if (size < numInterpolationPoints) {
+                                sender.sendMessage(ChatColor.RED + "kより多いラピスラズリブロックをおいてください。");
+                                return false;
+                            }
+                            maxi = numInterpolationPoints;
+                        }
 
-            // 距離が近い順にk個取り出す。ただし、numInterpolationPoints=0の時は全部
-            int size = heightControlPoints.size();
-            int maxi;
-            if (numInterpolationPoints == 0) {
-                if (size == 0) {
-                    sender.sendMessage("最低一つはラピスラズリブロックをおいてください。");
-                    return true;
-                }
-                maxi = size;
-            } else {
-                if (size < numInterpolationPoints) {
-                    sender.sendMessage("kより多いラピスラズリブロックをおいてください。");
-                    return true;
-                }
-                maxi = numInterpolationPoints;
-            }
+                        // 地形の補間計算
+                        executor.run(
+                                interpolateSurface(maxi, bound, heightmapArray, heightControlPoints),
+                                s -> s.forEach(str -> sender.sendMessage(ChatColor.GREEN + "地形補間を計算中... " + str)),
+                                e -> sender.sendMessage(ChatColor.RED + "地形補間の計算中にエラーが発生しました。"),
+                                () -> {
+                                    // ブロック変更開始 (WorldEditのUndoに登録される)
+                                    EditSession editSession = worldEdit.createEditSession(player);
+                                    // 範囲中の地形を実際に改変
+                                    executor.run(
+                                            applySurface(editSession, wWorld, bReplaceAll, bound, heightmapArray),
+                                            s -> s.forEach(str -> sender.sendMessage(ChatColor.GREEN + "ブロックを設置中... " + str)),
+                                            e -> sender.sendMessage(ChatColor.RED + e.getMessage()),
+                                            () -> {
+                                                editSession.flushQueue();
+                                                session.remember(editSession);
+                                                sender.sendMessage(ChatColor.GREEN + "設置完了");
+                                                return false;
+                                            }
+                                    );
 
-            // 地形の補間計算
-            interpolateSurface(maxi, bound, heightmapArray, heightControlPoints);
+                                    return true;
+                                }
+                        );
 
-            // ブロック変更開始 (WorldEditのUndoに登録される)
-            EditSession editSession = worldEdit.createEditSession(player);
-            try {
-                // 範囲中の地形を実際に改変
-                applySurface(editSession, wWorld, bReplaceAll, bound, heightmapArray);
-            } catch (RuntimeException e) {
-                // 最大設置数制限超過
-                sender.sendMessage(e.getMessage());
-                return true;
-            } finally {
-                editSession.flushQueue();
-                session.remember(editSession);
-            }
+                        return true;
+                    }
+            );
 
             return true;
         }
@@ -184,42 +204,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         }
     }
 
-    private interface RegionLoop {
-        /**
-         * x,z座標ごとにyHeightを変更する
-         *
-         * @param xPoint  x座標
-         * @param zPoint  z座標
-         * @param yHeight ハイトマップの高さ、未定義は-1
-         * @return 更新後のyHeight
-         */
-        int loop(int xPoint, int zPoint, int yHeight);
-
-        /**
-         * x,z座標ごとにループを行う
-         *
-         * @param region         範囲
-         * @param heightmapArray ハイトマップデータ
-         * @param func           処理関数
-         */
-        static void forEach(CuboidRegion region, int[][] heightmapArray, RegionLoop func) {
-            int x1 = region.getMinimumPoint().getBlockX();
-            int z1 = region.getMinimumPoint().getBlockZ();
-            int x2 = region.getMaximumPoint().getBlockX();
-            int z2 = region.getMaximumPoint().getBlockZ();
-            // x座標方向のループ
-            for (int xPoint = x1; xPoint <= x2; xPoint++) {
-                // z座標方向のループ
-                for (int zPoint = z1; zPoint <= z2; zPoint++) {
-                    int top = heightmapArray[xPoint - x1][zPoint - z1];
-                    top = func.loop(xPoint, zPoint, top);
-                    heightmapArray[xPoint - x1][zPoint - z1] = top;
-                }
-            }
-        }
-    }
-
-    private void applySurface(EditSession editSession, com.sk89q.worldedit.world.World wWorld, boolean bReplaceAll, CuboidRegion region, int[][] heightmapArray) {
+    private static Operation applySurface(EditSession editSession, World wWorld, boolean bReplaceAll, CuboidRegion region, int[][] heightmapArray) {
         BaseBlock lapis = new BaseBlock(BlockID.LAPIS_LAZULI_BLOCK);
         BaseBlock air = new BaseBlock(BlockID.AIR);
         BaseBlock grass = new BaseBlock(BlockID.GRASS);
@@ -227,43 +212,43 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         BaseBlock stone = new BaseBlock(BlockID.STONE);
         int y1 = region.getMinimumPoint().getBlockY();
         int y2 = region.getMaximumPoint().getBlockY();
-        RegionLoop.forEach(region, heightmapArray, (xPoint, zPoint, top) -> {
-            try {
-                // 縦長の範囲を置き換えする
-                // ラピスラズリブロックを消去したうえで、標高の地点まで土を盛っていく
-                editSession.replaceBlocks(
-                        new CuboidRegion(wWorld, new BlockVector(xPoint, y1, zPoint), new BlockVector(xPoint, y2, zPoint)),
-                        // bReplaceAllがtrueのとき全て書き換え、falseのとき空気のみ書き換える。
-                        bReplaceAll ? Masks.alwaysTrue() : new BlockMask(editSession, air, lapis),
-                        new Pattern() {
-                            @Override
-                            public BaseBlock next(Vector position) {
-                                int yPoint = position.getBlockY();
-                                if (top - yPoint < 0) {
-                                    return air;
-                                } else if (top - yPoint < 1) {
-                                    return grass;
-                                } else if (top - yPoint < 5) {
-                                    return dirt;
-                                } else {
-                                    return stone;
-                                }
+        return new RegionOperation(region, heightmapArray, (xPoint, zPoint, top, context) -> {
+            // 縦長の範囲を置き換えする
+            // ラピスラズリブロックを消去したうえで、標高の地点まで土を盛っていく
+            editSession.replaceBlocks(
+                    new CuboidRegion(
+                            wWorld,
+                            new BlockVector(xPoint, y1, zPoint),
+                            new BlockVector(xPoint, bReplaceAll ? y2 : top, zPoint)
+                    ),
+                    // bReplaceAllがtrueのとき全て書き換え、falseのとき空気のみ書き換える。
+                    bReplaceAll ? Masks.alwaysTrue() : new FuzzyBlockMask(editSession, air, lapis),
+                    new Pattern() {
+                        @Override
+                        public BaseBlock next(Vector position) {
+                            int yPoint = position.getBlockY();
+                            if (top - yPoint < 0) {
+                                return air;
+                            } else if (top - yPoint < 1) {
+                                return grass;
+                            } else if (top - yPoint < 5) {
+                                return dirt;
+                            } else {
+                                return stone;
                             }
+                        }
 
-                            @Override
-                            public BaseBlock next(int x, int y, int z) {
-                                return next(new Vector(x, y, z));
-                            }
-                        });
-            } catch (MaxChangedBlocksException e) {
-                throw new RuntimeException("最大ブロック数制限を超えました", e);
-            }
+                        @Override
+                        public BaseBlock next(int x, int y, int z) {
+                            return next(new Vector(x, y, z));
+                        }
+                    });
             return top;
         });
     }
 
-    private void interpolateSurface(int maxi, CuboidRegion region, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
-        RegionLoop.forEach(region, heightmapArray, (xPoint, zPoint, top) -> {
+    private static Operation interpolateSurface(int maxi, CuboidRegion region, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
+        return new RegionOperation(region, heightmapArray, (xPoint, zPoint, top, context) -> {
             // ラピスラズリブロックがなかった場合、k近傍法を参考にし、y=sum(yn/((x-xn)^2+(z-zn)^2))/sum(1/((x-xn)^2+(z-zn)^2))で標高計算。あった場合そのy座標が標高
             if (top == -1) {
                 // 距離のリストに変換。
@@ -291,28 +276,28 @@ public class CommandListener implements CommandExecutor, TabCompleter {
         });
     }
 
-    private static void collectSurfacePoints(World world, CuboidRegion region, boolean bCollectBorder, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
+    private static Operation collectSurfacePoints(World wWorld, CuboidRegion region, boolean bCollectBorder, int[][] heightmapArray, ArrayList<ControlPointData> heightControlPoints) {
         int x1 = region.getMinimumPoint().getBlockX();
         int y1 = region.getMinimumPoint().getBlockY();
         int z1 = region.getMinimumPoint().getBlockZ();
         int x2 = region.getMaximumPoint().getBlockX();
         int y2 = region.getMaximumPoint().getBlockY();
         int z2 = region.getMaximumPoint().getBlockZ();
-        RegionLoop.forEach(region, heightmapArray, (xPoint, zPoint, top) -> {
+        return new RegionOperation(region, heightmapArray, (xPoint, zPoint, top, context) -> {
             // (x,z)におけるラピスラズリブロックのうち最高を記録。なければ-1を代入
             top = -1;
             // y座標方向のループ
             for (int yPoint = y2; yPoint >= y1; yPoint--) {
                 // ループで処理する座標のブロックを取得します。
-                Block currentBlock = new Location(world, xPoint, yPoint, zPoint).getBlock();
-                if (currentBlock.getType() == Material.LAPIS_BLOCK) {
+                BaseBlock currentBlock = wWorld.getLazyBlock(new BlockVector(xPoint, yPoint, zPoint));
+                if (currentBlock.getId() == BlockID.LAPIS_LAZULI_BLOCK) {
                     top = yPoint;
                     break;
                 }
                 // ボーダーモードがONかつ、座標が縁で空気以外のブロックがあれば、それをラピスブロックとして扱う
                 else if (bCollectBorder
                         && (xPoint == x1 || xPoint == x2 || zPoint == z1 || zPoint == z2)
-                        && (currentBlock.getType() != Material.AIR)) {
+                        && (!currentBlock.isAir())) {
                     top = yPoint;
                     break;
                 }
