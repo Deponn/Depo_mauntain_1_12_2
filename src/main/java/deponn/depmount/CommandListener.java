@@ -66,41 +66,11 @@ public class CommandListener implements CommandExecutor, TabCompleter {
             }
 
             //コマンド引数を処理
-            List<String> argsList = Arrays.asList(args);
-            boolean bReplaceAllArg = false;
-            boolean bCollectBorderArg = false;
-            int numInterpolationPointsArg = 0;
-            if (argsList.contains("-a") || argsList.contains("--all")) {
-                // 全置き換えモード、trueの場合空気ブロック以外も置き換える
-                bReplaceAllArg = true;
+            CommandParser parser = CommandParser.parseCommand(sender, args);
+            if (!parser.isSuccess) {
+                // パース失敗
+                return true;
             }
-            if (argsList.contains("-b") || argsList.contains("--border")) {
-                // 境界にラピスラズリブロック配置モード、trueの場合境界にラピスラズリブロックをおく
-                bCollectBorderArg = true;
-            }
-            if (argsList.contains("-n") || argsList.contains("--num")) {
-                // 引数が何番目か取得し、若い番号を採用する
-                int index = Math.min(argsList.indexOf("-n"), argsList.indexOf("--num"));
-                if (index + 1 >= argsList.size()) {
-                    // 引数の次がなかった場合、エラー
-                    sender.sendMessage(ChatColor.RED + "数値が必要です。 -n <数字>");
-                    return true;
-                }
-                try {
-                    // 補間する頂点(ラピスラズリブロック)の数
-                    numInterpolationPointsArg = Integer.parseInt(argsList.get(index + 1));
-                    if (numInterpolationPointsArg < 0) {
-                        sender.sendMessage(ChatColor.RED + "数値は正の数である必要があります。 -n <数字>");
-                        return false;
-                    }
-                } catch (NumberFormatException e) {
-                    sender.sendMessage(ChatColor.RED + "数値が不正です。 -n <数字>");
-                    return false;
-                }
-            }
-            boolean bReplaceAll = bReplaceAllArg;
-            boolean bCollectBorder = bCollectBorderArg;
-            int numInterpolationPoints = numInterpolationPointsArg;
 
             // 範囲を設定
             CuboidRegion bound = new CuboidRegion(region.getWorld(), region.getMinimumPoint(), region.getMaximumPoint());
@@ -119,25 +89,25 @@ public class CommandListener implements CommandExecutor, TabCompleter {
 
             // ラピスラズリブロックを目印として、範囲中のデータを取得
             executor.run(
-                    MountOperation.collectSurfacePoints(wWorld, bound, bCollectBorder, heightmapArray, heightControlPoints),
+                    MountOperation.collectSurfacePoints(wWorld, bound, parser.bCollectBorder, heightmapArray, heightControlPoints),
                     s -> s.forEach(str -> sender.sendMessage(ChatColor.GREEN + "ラピスラズリの位置を取得中... " + str)),
                     e -> sender.sendMessage(ChatColor.RED + "ラピスブロック位置の取得中にエラーが発生しました。"),
                     () -> {
                         // 距離が近い順にk個取り出す。ただし、numInterpolationPointsArg=0の時は全部
                         int size = heightControlPoints.size();
                         int maxi;
-                        if (numInterpolationPoints == 0) {
+                        if (parser.numInterpolationPoints == 0) {
                             if (size == 0) {
                                 sender.sendMessage(ChatColor.RED + "最低一つはラピスラズリブロックをおいてください。");
                                 return false;
                             }
                             maxi = size;
                         } else {
-                            if (size < numInterpolationPoints) {
+                            if (size < parser.numInterpolationPoints) {
                                 sender.sendMessage(ChatColor.RED + "kより多いラピスラズリブロックをおいてください。");
                                 return false;
                             }
-                            maxi = numInterpolationPoints;
+                            maxi = parser.numInterpolationPoints;
                         }
 
                         // 地形の補間計算
@@ -150,7 +120,7 @@ public class CommandListener implements CommandExecutor, TabCompleter {
                                     EditSession editSession = worldEdit.createEditSession(player);
                                     // 範囲中の地形を実際に改変
                                     executor.run(
-                                            MountOperation.applySurface(editSession, wWorld, bReplaceAll, bound, heightmapArray),
+                                            MountOperation.applySurface(editSession, wWorld, parser.bReplaceAll, bound, heightmapArray),
                                             s -> s.forEach(str -> sender.sendMessage(ChatColor.GREEN + "ブロックを設置中... " + str)),
                                             e -> sender.sendMessage(ChatColor.RED + e.getMessage()),
                                             () -> {

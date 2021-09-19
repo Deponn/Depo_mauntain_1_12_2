@@ -5,7 +5,7 @@ main: deponn.depmount.DepMount
 commands: #自作プラグインのコマンドを宣言
   /mountain:
     description: ラピスラズリブロックの点の補間により山を作成します。
-    usage: //mountain [-a|--all:空気以外も書き換え] [-b|--border:境界の高さを取得] [-n|--num:補完の頂点数]
+    usage: //mountain [-a:空気以外も書き換え] [-b:境界の高さを取得] [-n:補完の頂点数]
     permission: mountain
 
 permissions:
