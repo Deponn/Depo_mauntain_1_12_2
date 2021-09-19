@@ -51,7 +51,7 @@ public class CommandParser {
      */
     public static List<String> suggestCommand(CommandSender sender, String[] args) {
         List<String> argsList = Arrays.asList(args);
-        if (argsList.size() > 0 && "-n".equals(argsList.get(argsList.size() - 1))) {
+        if (argsList.size() > 1 && "-n".equals(argsList.get(argsList.size() - 2))) {
             return Arrays.asList("0", "5", "20");
         } else {
             return Stream.of("-a", "-b", "-n")

@@ -152,6 +152,6 @@ public class CommandListener implements CommandExecutor, TabCompleter {
     // コマンドのTAB補完の実装
     @Override
     public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
-        return null;
+        return CommandParser.suggestCommand(sender, args);
     }
 }
